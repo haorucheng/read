@@ -124,24 +124,29 @@ public class ReaderActivity extends Activity {
         // Keep one full rendered line as a safety margin so the last line is never clipped.
         int safeHeight = height - (int) Math.ceil(paint.getFontSpacing() + dp(8));
         if (safeHeight <= 0) return;
-        int start = 0;
-        while (start < content.length()) {
-            // Measure this page exactly as it will be rendered. Splitting a layout made
-            // from the whole book changes line breaks when the substring is displayed.
-            int measureEnd = Math.min(content.length(), start + 16_000);
-            String remaining = content.substring(start, measureEnd);
-            StaticLayout layout = StaticLayout.Builder.obtain(remaining, 0, remaining.length(), paint, width)
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                    .setIncludePad(false)
-                    .setLineSpacing(dp(8), 1f)
-                    .build();
-            int line = 0;
-            while (line < layout.getLineCount() && layout.getLineBottom(line) <= safeHeight) line++;
-            if (line == 0) line = 1;
-            int end = start + layout.getLineEnd(line - 1);
-            if (end <= start) end = Math.min(start + 1, content.length());
-            pages.add(new Page(start, end));
-            start = end;
+        // Lay out the complete book only once. Each page then reuses these exact visual
+        // lines, avoiding both slow repeated layouts and different wrapping at page starts.
+        StaticLayout layout = StaticLayout.Builder.obtain(content, 0, content.length(), paint, width)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setIncludePad(false)
+                .setLineSpacing(dp(8), 1f)
+                .build();
+        int line = 0;
+        while (line < layout.getLineCount()) {
+            int firstLine = line;
+            int top = layout.getLineTop(firstLine);
+            while (line < layout.getLineCount() && layout.getLineBottom(line) - top <= safeHeight) line++;
+            if (line == firstLine) line++;
+            int start = layout.getLineStart(firstLine);
+            int end = layout.getLineEnd(line - 1);
+            StringBuilder display = new StringBuilder(end - start + line - firstLine);
+            for (int current = firstLine; current < line; current++) {
+                int lineStart = layout.getLineStart(current);
+                int lineEnd = layout.getLineEnd(current);
+                display.append(content, lineStart, lineEnd);
+                if (current < line - 1 && (lineEnd == lineStart || content.charAt(lineEnd - 1) != '\n')) display.append('\n');
+            }
+            pages.add(new Page(start, end, display.toString()));
         }
     }
 
@@ -150,7 +155,7 @@ public class ReaderActivity extends Activity {
         Runnable replaceText = () -> {
             currentPage = target;
             Page page = pages.get(target);
-            pageText.setText(content.substring(page.start, page.end));
+            pageText.setText(page.displayText);
             pageIndicator.setText((target + 1) + " / " + pages.size());
         };
         if (!animate || direction == 0) {
@@ -241,6 +246,7 @@ public class ReaderActivity extends Activity {
     private static final class Page {
         final int start;
         final int end;
-        Page(int start, int end) { this.start = start; this.end = end; }
+        final String displayText;
+        Page(int start, int end, String displayText) { this.start = start; this.end = end; this.displayText = displayText; }
     }
 }
