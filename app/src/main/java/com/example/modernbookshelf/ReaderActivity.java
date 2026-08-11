@@ -12,6 +12,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -29,7 +30,10 @@ public class ReaderActivity extends Activity {
     private Book book;
     private FrameLayout pageFrame;
     private TextView pageText;
+    private TextView scrollText;
     private TextView pageIndicator;
+    private ScrollView scrollReader;
+    private LinearLayout pageControls;
     private LinearLayout settingsPanel;
     private Button pageModeButton;
     private String content = "";
@@ -60,6 +64,18 @@ public class ReaderActivity extends Activity {
         pageText.setGravity(Gravity.TOP | Gravity.START);
         pageText.setPadding(dp(22), dp(18), dp(22), dp(18));
         pageFrame.addView(pageText, new FrameLayout.LayoutParams(-1, -1));
+        scrollReader = new ScrollView(this);
+        scrollText = new TextView(this);
+        scrollText.setTextColor(0xff202020);
+        scrollText.setTextSize(fontSize);
+        scrollText.setLineSpacing(dp(8), 1f);
+        scrollText.setIncludeFontPadding(false);
+        scrollText.setGravity(Gravity.TOP | Gravity.START);
+        scrollText.setPadding(dp(22), dp(18), dp(22), dp(18));
+        scrollText.setOnClickListener(v -> showSettings());
+        scrollReader.addView(scrollText, new ScrollView.LayoutParams(-1, -2));
+        scrollReader.setVisibility(View.GONE);
+        pageFrame.addView(scrollReader, new FrameLayout.LayoutParams(-1, -1));
         root.addView(pageFrame, new FrameLayout.LayoutParams(-1, -1));
 
         settingsPanel = new LinearLayout(this);
@@ -74,17 +90,17 @@ public class ReaderActivity extends Activity {
         addEqual(topBar, back); addEqual(topBar, chapters); addEqual(topBar, smaller); addEqual(topBar, larger);
         settingsPanel.addView(topBar);
 
-        LinearLayout bottomBar = new LinearLayout(this);
+        pageControls = new LinearLayout(this);
         Button previous = button("\u4e0a\u4e00\u9875");
         pageIndicator = new TextView(this);
         pageIndicator.setGravity(Gravity.CENTER);
         Button next = button("\u4e0b\u4e00\u9875");
-        bottomBar.addView(previous, new LinearLayout.LayoutParams(0, dp(48), 1));
-        bottomBar.addView(pageIndicator, new LinearLayout.LayoutParams(0, dp(48), 1));
-        bottomBar.addView(next, new LinearLayout.LayoutParams(0, dp(48), 1));
-        settingsPanel.addView(bottomBar);
+        pageControls.addView(previous, new LinearLayout.LayoutParams(0, dp(48), 1));
+        pageControls.addView(pageIndicator, new LinearLayout.LayoutParams(0, dp(48), 1));
+        pageControls.addView(next, new LinearLayout.LayoutParams(0, dp(48), 1));
+        settingsPanel.addView(pageControls);
         LinearLayout modeBar = new LinearLayout(this);
-        pageModeButton = button("翻页：左右滑动");
+        pageModeButton = button("阅读：左右翻页");
         Button closeSettings = button("收起设置");
         modeBar.addView(pageModeButton, new LinearLayout.LayoutParams(0, dp(46), 2));
         modeBar.addView(closeSettings, new LinearLayout.LayoutParams(0, dp(46), 1));
@@ -178,22 +194,13 @@ public class ReaderActivity extends Activity {
             replaceText.run();
             return;
         }
-        float distance = verticalPaging ? pageFrame.getHeight() : pageFrame.getWidth();
-        if (verticalPaging) {
-            pageText.animate().translationY(direction > 0 ? -distance : distance).alpha(0f).setDuration(140)
-                    .withEndAction(() -> {
-                        replaceText.run();
-                        pageText.setTranslationY(direction > 0 ? distance : -distance);
-                        pageText.animate().translationY(0).alpha(1f).setDuration(180).start();
-                    }).start();
-        } else {
-            pageText.animate().translationX(direction > 0 ? -distance : distance).alpha(0f).setDuration(140)
-                    .withEndAction(() -> {
-                        replaceText.run();
-                        pageText.setTranslationX(direction > 0 ? distance : -distance);
-                        pageText.animate().translationX(0).alpha(1f).setDuration(180).start();
-                    }).start();
-        }
+        float distance = pageFrame.getWidth();
+        pageText.animate().translationX(direction > 0 ? -distance : distance).alpha(0f).setDuration(140)
+                .withEndAction(() -> {
+                    replaceText.run();
+                    pageText.setTranslationX(direction > 0 ? distance : -distance);
+                    pageText.animate().translationX(0).alpha(1f).setDuration(180).start();
+                }).start();
     }
 
     private boolean handlePageSwipe(MotionEvent event) {
@@ -213,17 +220,28 @@ public class ReaderActivity extends Activity {
                 showPage(currentPage + (deltaX < 0 ? 1 : -1), deltaX < 0 ? 1 : -1, true);
                 return true;
             }
-            if (verticalPaging && Math.abs(deltaY) >= dp(56) && Math.abs(deltaY) > Math.abs(deltaX)) {
-                showPage(currentPage + (deltaY < 0 ? 1 : -1), deltaY < 0 ? 1 : -1, true);
-                return true;
-            }
         }
         return true;
     }
 
     private void togglePagingMode() {
         verticalPaging = !verticalPaging;
-        pageModeButton.setText(verticalPaging ? "翻页：上下滑动" : "翻页：左右滑动");
+        pageModeButton.setText(verticalPaging ? "阅读：上下连续滚动" : "阅读：左右翻页");
+        if (verticalPaging) {
+            scrollText.setText(content);
+            pageText.setVisibility(View.GONE);
+            scrollReader.setVisibility(View.VISIBLE);
+            pageControls.setVisibility(View.GONE);
+            scrollReader.post(() -> {
+                int range = Math.max(0, scrollText.getHeight() - scrollReader.getHeight());
+                scrollReader.scrollTo(0, Math.round(range * book.progress));
+            });
+        } else {
+            scrollReader.setVisibility(View.GONE);
+            pageText.setVisibility(View.VISIBLE);
+            pageControls.setVisibility(View.VISIBLE);
+            showPage(pageForOffset(Math.round(book.progress * Math.max(0, content.length() - 1))), 0, false);
+        }
     }
 
     private void showSettings() {
@@ -290,7 +308,12 @@ public class ReaderActivity extends Activity {
 
     @Override protected void onPause() {
         super.onPause();
-        book.progress = pages.size() <= 1 ? 0 : (float) currentPage / (pages.size() - 1);
+        if (verticalPaging) {
+            int range = Math.max(1, scrollText.getHeight() - scrollReader.getHeight());
+            book.progress = Math.min(1f, (float) scrollReader.getScrollY() / range);
+        } else {
+            book.progress = pages.size() <= 1 ? 0 : (float) currentPage / (pages.size() - 1);
+        }
         List<Book> all = BookStore.load(this);
         for (int i = 0; i < all.size(); i++) if (all.get(i).id.equals(book.id)) all.set(i, book);
         BookStore.save(this, all);
