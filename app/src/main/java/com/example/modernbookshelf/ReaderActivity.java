@@ -164,21 +164,30 @@ public class ReaderActivity extends Activity {
                 .setLineSpacing(dp(8), 1f)
                 .build();
         int line = 0;
+        int cursor = 0;
         while (line < layout.getLineCount()) {
             int firstLine = line;
             int top = layout.getLineTop(firstLine);
             while (line < layout.getLineCount() && layout.getLineBottom(line) - top <= safeHeight) line++;
             if (line == firstLine) line++;
-            int start = layout.getLineStart(firstLine);
+            // Keep the source cursor authoritative. StaticLayout can omit separator
+            // whitespace at a visual line start; using its next line start directly
+            // can make content appear to jump at a page boundary.
+            int start = cursor;
             int end = layout.getLineEnd(line - 1);
             StringBuilder display = new StringBuilder(end - start + line - firstLine);
+            int copiedUntil = start;
             for (int current = firstLine; current < line; current++) {
-                int lineStart = layout.getLineStart(current);
+                int lineStart = Math.max(copiedUntil, layout.getLineStart(current));
                 int lineEnd = layout.getLineEnd(current);
+                if (copiedUntil < lineStart) display.append(content, copiedUntil, lineStart);
                 display.append(content, lineStart, lineEnd);
+                copiedUntil = lineEnd;
                 if (current < line - 1 && (lineEnd == lineStart || content.charAt(lineEnd - 1) != '\n')) display.append('\n');
             }
+            if (copiedUntil < end) display.append(content, copiedUntil, end);
             pages.add(new Page(start, end, display.toString()));
+            cursor = end;
         }
     }
 
