@@ -2,7 +2,6 @@ package com.example.modernbookshelf;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.os.Build;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.os.Bundle;
@@ -64,7 +63,7 @@ public class ReaderActivity extends Activity {
         pageText.setTextColor(0xff202020);
         pageText.setTextSize(fontSize);
         pageText.setLineSpacing(dp(8), 1f);
-        pageText.setPadding(dp(22), dp(18), dp(22), dp(18));
+        pageText.setPadding(dp(22), dp(48), dp(22), dp(18));
         pageFrame.addView(pageText, new FrameLayout.LayoutParams(-1, -1));
         scrollReader = new ScrollView(this);
         scrollText = new TextView(this);
@@ -73,7 +72,7 @@ public class ReaderActivity extends Activity {
         scrollText.setLineSpacing(dp(8), 1f);
         scrollText.setIncludeFontPadding(false);
         scrollText.setGravity(Gravity.TOP | Gravity.START);
-        scrollText.setPadding(dp(22), dp(18), dp(22), dp(18));
+        scrollText.setPadding(dp(22), dp(48), dp(22), dp(18));
         scrollText.setOnClickListener(v -> showSettings());
         scrollReader.addView(scrollText, new ScrollView.LayoutParams(-1, -2));
         scrollReader.setVisibility(View.GONE);
@@ -220,7 +219,7 @@ public class ReaderActivity extends Activity {
             if (Math.abs(deltaX) < dp(12) && Math.abs(deltaY) < dp(12)
                     && touchStartX > pageFrame.getWidth() * .25f && touchStartX < pageFrame.getWidth() * .75f
                     && touchStartY > pageFrame.getHeight() * .25f && touchStartY < pageFrame.getHeight() * .75f) {
-                showSettings();
+                toggleSettings();
                 return true;
             }
             if (!verticalPaging && Math.abs(deltaX) >= dp(56) && Math.abs(deltaX) > Math.abs(deltaY)) {
@@ -257,6 +256,11 @@ public class ReaderActivity extends Activity {
         settingsPanel.setAlpha(0f);
         settingsPanel.setTranslationY(dp(180));
         settingsPanel.animate().alpha(1f).translationY(0).setDuration(180).start();
+    }
+
+    private void toggleSettings() {
+        if (settingsPanel.getVisibility() == View.VISIBLE) hideSettings();
+        else showSettings();
     }
 
     private void hideSettings() {
@@ -305,12 +309,8 @@ public class ReaderActivity extends Activity {
     private Button button(String label) { Button button = new Button(this); button.setText(label); return button; }
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density); }
     private void hideStatusBar() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            getWindow().getInsetsController().hide(android.view.WindowInsets.Type.statusBars());
-        } else {
-            getWindow().setFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                    android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        }
+        getWindow().setFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
     }
 
     private static byte[] readAll(FileInputStream input) throws java.io.IOException {
