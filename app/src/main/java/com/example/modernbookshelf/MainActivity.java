@@ -3,8 +3,10 @@ package com.example.modernbookshelf;
 import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.ArrayAdapter;
@@ -26,12 +28,14 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 public class MainActivity extends Activity {
     private static final int PICK_TEXT = 101;
+    private static final String UPDATE_MANIFEST = "https://raw.githubusercontent.com/haorucheng/read/main/update.json";
     private final List<Book> books = new ArrayList<>();
     private ArrayAdapter<String> bookshelfAdapter;
     private EditText query;
@@ -52,8 +56,10 @@ public class MainActivity extends Activity {
         LinearLayout actions = new LinearLayout(this);
         Button importButton = button("导入 TXT");
         Button searchButton = button("网络搜索");
+        Button updateButton = button("\u68c0\u67e5\u66f4\u65b0");
         actions.addView(importButton, new LinearLayout.LayoutParams(0, dp(46), 1));
         actions.addView(searchButton, new LinearLayout.LayoutParams(0, dp(46), 1));
+        actions.addView(updateButton, new LinearLayout.LayoutParams(0, dp(46), 1));
         root.addView(actions);
 
         query = new EditText(this);
@@ -70,6 +76,7 @@ public class MainActivity extends Activity {
         refreshBookshelf();
         importButton.setOnClickListener(v -> pickTextFile());
         searchButton.setOnClickListener(v -> searchOnline(query.getText().toString().trim()));
+        updateButton.setOnClickListener(v -> checkForUpdates());
         list.setOnItemClickListener((parent, v, pos, id) -> openBook(books.get(pos)));
         list.setOnItemLongClickListener((parent, v, pos, id) -> {
             Book selected = books.get(pos);
@@ -206,6 +213,96 @@ public class MainActivity extends Activity {
         int count;
         while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
         return output.toByteArray();
+    }
+
+    private void checkForUpdates() {
+        Toast.makeText(this, "\u6b63\u5728\u68c0\u67e5\u66f4\u65b0\u2026", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                HttpURLConnection connection = (HttpURLConnection) new URL(UPDATE_MANIFEST).openConnection();
+                connection.setConnectTimeout(10_000);
+                connection.setReadTimeout(10_000);
+                JSONObject value;
+                try (InputStream input = connection.getInputStream()) {
+                    value = new JSONObject(new String(readAll(input), StandardCharsets.UTF_8));
+                }
+                int remoteCode = value.getInt("versionCode");
+                int localCode = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+                if (remoteCode <= localCode) {
+                    runOnUiThread(() -> Toast.makeText(this, "\u5df2\u662f\u6700\u65b0\u7248\u672c", Toast.LENGTH_SHORT).show());
+                    return;
+                }
+                String apkUrl = value.getString("apkUrl");
+                String checksum = value.getString("sha256");
+                if (apkUrl.isEmpty() || checksum.isEmpty()) throw new IllegalStateException("\u66f4\u65b0\u5305\u5c1a\u672a\u53d1\u5e03");
+                UpdateInfo update = new UpdateInfo(value.getString("versionName"), value.optString("notes", ""), apkUrl, checksum);
+                runOnUiThread(() -> showUpdateDialog(update));
+            } catch (Exception error) {
+                runOnUiThread(() -> Toast.makeText(this, "\u68c0\u67e5\u66f4\u65b0\u5931\u8d25\uff1a" + error.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    private void showUpdateDialog(UpdateInfo update) {
+        new android.app.AlertDialog.Builder(this).setTitle("\u53d1\u73b0\u65b0\u7248\u672c " + update.versionName)
+                .setMessage(update.notes).setNegativeButton("\u6682\u4e0d\u66f4\u65b0", null)
+                .setPositiveButton("\u7acb\u5373\u66f4\u65b0", (dialog, which) -> downloadUpdate(update)).show();
+    }
+
+    private void downloadUpdate(UpdateInfo update) {
+        Toast.makeText(this, "\u6b63\u5728\u4e0b\u8f7d\u66f4\u65b0\u2026", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            File target = new File(getCacheDir(), "update.apk");
+            try {
+                HttpURLConnection connection = (HttpURLConnection) new URL(update.apkUrl).openConnection();
+                connection.setConnectTimeout(15_000);
+                connection.setReadTimeout(30_000);
+                MessageDigest digest = MessageDigest.getInstance("SHA-256");
+                try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(target)) {
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) {
+                        output.write(buffer, 0, count);
+                        digest.update(buffer, 0, count);
+                    }
+                }
+                if (!toHex(digest.digest()).equalsIgnoreCase(update.sha256.replace(" ", ""))) {
+                    throw new SecurityException("\u66f4\u65b0\u5305\u6821\u9a8c\u5931\u8d25");
+                }
+                runOnUiThread(this::installUpdate);
+            } catch (Exception error) {
+                target.delete();
+                runOnUiThread(() -> Toast.makeText(this, "\u66f4\u65b0\u4e0b\u8f7d\u5931\u8d25\uff1a" + error.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    private void installUpdate() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+            Toast.makeText(this, "\u8bf7\u5141\u8bb8\u672c\u5e94\u7528\u5b89\u88c5\u672a\u77e5\u6765\u6e90\u66f4\u65b0\uff0c\u518d\u6b21\u70b9\u51fb\u68c0\u67e5\u66f4\u65b0", Toast.LENGTH_LONG).show();
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
+            return;
+        }
+        Intent installer = new Intent(Intent.ACTION_VIEW);
+        installer.setDataAndType(UpdateFileProvider.apkUri(), "application/vnd.android.package-archive");
+        installer.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivity(installer);
+    }
+
+    private static String toHex(byte[] bytes) {
+        StringBuilder output = new StringBuilder(bytes.length * 2);
+        for (byte value : bytes) output.append(String.format("%02x", value));
+        return output.toString();
+    }
+
+    private static final class UpdateInfo {
+        final String versionName, notes, apkUrl, sha256;
+        UpdateInfo(String versionName, String notes, String apkUrl, String sha256) {
+            this.versionName = versionName;
+            this.notes = notes;
+            this.apkUrl = apkUrl;
+            this.sha256 = sha256;
+        }
     }
 
     @Override protected void onResume() { super.onResume(); if (!books.isEmpty()) { books.clear(); books.addAll(BookStore.load(this)); refreshBookshelf(); } }
