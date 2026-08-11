@@ -124,20 +124,24 @@ public class ReaderActivity extends Activity {
         // Keep one full rendered line as a safety margin so the last line is never clipped.
         int safeHeight = height - (int) Math.ceil(paint.getFontSpacing() + dp(8));
         if (safeHeight <= 0) return;
-        StaticLayout layout = StaticLayout.Builder.obtain(content, 0, content.length(), paint, width)
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setIncludePad(false)
-                .setLineSpacing(dp(8), 1f)
-                .build();
-        int line = 0;
-        while (line < layout.getLineCount()) {
-            int firstLine = line;
-            int top = layout.getLineTop(firstLine);
-            while (line < layout.getLineCount() && layout.getLineBottom(line) - top <= safeHeight) line++;
-            if (line == firstLine) line++;
-            int start = layout.getLineStart(firstLine);
-            int end = layout.getLineEnd(line - 1);
+        int start = 0;
+        while (start < content.length()) {
+            // Measure this page exactly as it will be rendered. Splitting a layout made
+            // from the whole book changes line breaks when the substring is displayed.
+            int measureEnd = Math.min(content.length(), start + 16_000);
+            String remaining = content.substring(start, measureEnd);
+            StaticLayout layout = StaticLayout.Builder.obtain(remaining, 0, remaining.length(), paint, width)
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                    .setIncludePad(false)
+                    .setLineSpacing(dp(8), 1f)
+                    .build();
+            int line = 0;
+            while (line < layout.getLineCount() && layout.getLineBottom(line) <= safeHeight) line++;
+            if (line == 0) line = 1;
+            int end = start + layout.getLineEnd(line - 1);
+            if (end <= start) end = Math.min(start + 1, content.length());
             pages.add(new Page(start, end));
+            start = end;
         }
     }
 
