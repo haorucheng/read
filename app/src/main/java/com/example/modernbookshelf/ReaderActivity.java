@@ -2,6 +2,9 @@ package com.example.modernbookshelf;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.os.Build;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.os.Bundle;
 import android.text.Layout;
 import android.text.StaticLayout;
@@ -29,7 +32,7 @@ import java.util.regex.Pattern;
 public class ReaderActivity extends Activity {
     private Book book;
     private FrameLayout pageFrame;
-    private TextView pageText;
+    private PageCanvasView pageText;
     private TextView scrollText;
     private TextView pageIndicator;
     private ScrollView scrollReader;
@@ -48,6 +51,7 @@ public class ReaderActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        hideStatusBar();
         String id = getIntent().getStringExtra("book_id");
         for (Book candidate : BookStore.load(this)) {
             if (candidate.id.equals(id)) { book = candidate; break; }
@@ -56,12 +60,10 @@ public class ReaderActivity extends Activity {
 
         FrameLayout root = new FrameLayout(this);
         pageFrame = new FrameLayout(this);
-        pageText = new TextView(this);
+        pageText = new PageCanvasView(this);
         pageText.setTextColor(0xff202020);
         pageText.setTextSize(fontSize);
         pageText.setLineSpacing(dp(8), 1f);
-        pageText.setIncludeFontPadding(false);
-        pageText.setGravity(Gravity.TOP | Gravity.START);
         pageText.setPadding(dp(22), dp(18), dp(22), dp(18));
         pageFrame.addView(pageText, new FrameLayout.LayoutParams(-1, -1));
         scrollReader = new ScrollView(this);
@@ -152,12 +154,10 @@ public class ReaderActivity extends Activity {
         int height = pageFrame.getHeight() - pageText.getPaddingTop() - pageText.getPaddingBottom();
         if (width <= 0 || height <= 0 || content.isEmpty()) return;
         TextPaint paint = new TextPaint(pageText.getPaint());
-        // TextView and StaticLayout can differ by a fractional font descent on some devices.
-        // Keep one full rendered line as a safety margin so the last line is never clipped.
-        int safeHeight = height - (int) Math.ceil(paint.getFontSpacing() + dp(8));
-        if (safeHeight <= 0) return;
-        // Lay out the complete book only once. Each page then reuses these exact visual
-        // lines, avoiding both slow repeated layouts and different wrapping at page starts.
+        float lineHeight = paint.getFontSpacing() + dp(8);
+        if (lineHeight <= 0) return;
+        // Determine visual line breaks once, then draw those exact lines ourselves.
+        // This mirrors the original reader's approach and prevents TextView reflow.
         StaticLayout layout = StaticLayout.Builder.obtain(content, 0, content.length(), paint, width)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                 .setIncludePad(false)
@@ -167,26 +167,24 @@ public class ReaderActivity extends Activity {
         int cursor = 0;
         while (line < layout.getLineCount()) {
             int firstLine = line;
-            int top = layout.getLineTop(firstLine);
-            while (line < layout.getLineCount() && layout.getLineBottom(line) - top <= safeHeight) line++;
+            while (line < layout.getLineCount() && (line - firstLine + 1) * lineHeight <= height) line++;
             if (line == firstLine) line++;
             // Keep the source cursor authoritative. StaticLayout can omit separator
             // whitespace at a visual line start; using its next line start directly
             // can make content appear to jump at a page boundary.
             int start = cursor;
             int end = layout.getLineEnd(line - 1);
-            StringBuilder display = new StringBuilder(end - start + line - firstLine);
+            List<String> visualLines = new ArrayList<>(line - firstLine);
             int copiedUntil = start;
             for (int current = firstLine; current < line; current++) {
                 int lineStart = Math.max(copiedUntil, layout.getLineStart(current));
                 int lineEnd = layout.getLineEnd(current);
-                if (copiedUntil < lineStart) display.append(content, copiedUntil, lineStart);
-                display.append(content, lineStart, lineEnd);
+                String visual = content.substring(lineStart, lineEnd);
+                if (visual.endsWith("\n")) visual = visual.substring(0, visual.length() - 1);
+                visualLines.add(visual);
                 copiedUntil = lineEnd;
-                if (current < line - 1 && (lineEnd == lineStart || content.charAt(lineEnd - 1) != '\n')) display.append('\n');
             }
-            if (copiedUntil < end) display.append(content, copiedUntil, end);
-            pages.add(new Page(start, end, display.toString()));
+            pages.add(new Page(start, end, visualLines));
             cursor = end;
         }
     }
@@ -196,7 +194,7 @@ public class ReaderActivity extends Activity {
         Runnable replaceText = () -> {
             currentPage = target;
             Page page = pages.get(target);
-            pageText.setText(page.displayText);
+            pageText.setPage(page.visualLines);
             pageIndicator.setText((target + 1) + " / " + pages.size());
         };
         if (!animate || direction == 0) {
@@ -306,6 +304,14 @@ public class ReaderActivity extends Activity {
 
     private Button button(String label) { Button button = new Button(this); button.setText(label); return button; }
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density); }
+    private void hideStatusBar() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().getInsetsController().hide(android.view.WindowInsets.Type.statusBars());
+        } else {
+            getWindow().setFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                    android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        }
+    }
 
     private static byte[] readAll(FileInputStream input) throws java.io.IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -331,7 +337,43 @@ public class ReaderActivity extends Activity {
     private static final class Page {
         final int start;
         final int end;
-        final String displayText;
-        Page(int start, int end, String displayText) { this.start = start; this.end = end; this.displayText = displayText; }
+        final List<String> visualLines;
+        Page(int start, int end, List<String> visualLines) { this.start = start; this.end = end; this.visualLines = visualLines; }
+    }
+
+    /** Draws the precomputed lines directly so the displayed line height matches paging. */
+    private static final class PageCanvasView extends View {
+        private final TextPaint paint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        private final List<String> lines = new ArrayList<>();
+        private int lineSpacing;
+
+        PageCanvasView(android.content.Context context) { super(context); }
+
+        TextPaint getPaint() { return paint; }
+        void setTextColor(int color) { paint.setColor(color); invalidate(); }
+        void setTextSize(float sp) {
+            paint.setTextSize(sp * getResources().getDisplayMetrics().scaledDensity);
+            invalidate();
+        }
+        void setLineSpacing(int extra, float multiplier) {
+            lineSpacing = Math.round(extra * multiplier);
+            invalidate();
+        }
+        void setPage(List<String> sourceLines) {
+            lines.clear();
+            lines.addAll(sourceLines);
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            Paint.FontMetrics metrics = paint.getFontMetrics();
+            float baseline = getPaddingTop() - metrics.top;
+            float step = paint.getFontSpacing() + lineSpacing;
+            for (String line : lines) {
+                canvas.drawText(line, getPaddingLeft(), baseline, paint);
+                baseline += step;
+            }
+        }
     }
 }
