@@ -180,7 +180,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 String encoded = URLEncoder.encode(text, StandardCharsets.UTF_8.name());
-                HttpURLConnection connection = (HttpURLConnection) new URL("https://openlibrary.org/search.json?title=" + encoded + "&limit=15&fields=title,author_name,first_publish_year").openConnection();
+                HttpURLConnection connection = (HttpURLConnection) new URL("https://openlibrary.org/search.json?title=" + encoded + "&limit=15&fields=title,author_name,first_publish_year,key,ebook_access").openConnection();
                 connection.setRequestProperty("Accept", "application/json");
                 connection.setRequestProperty("User-Agent", "ModernBookshelf/1.0 (Android)");
                 connection.setConnectTimeout(10_000); connection.setReadTimeout(10_000);
@@ -194,11 +194,15 @@ public class MainActivity extends Activity {
                     raw = new String(readAll(response), StandardCharsets.UTF_8);
                 }
                 JSONArray docs = new JSONObject(raw).getJSONArray("docs");
-                List<String> results = new ArrayList<>();
+                List<SearchResult> results = new ArrayList<>();
                 for (int i = 0; i < docs.length(); i++) {
                     JSONObject item = docs.getJSONObject(i);
                     String author = item.optJSONArray("author_name") == null ? "未知作者" : item.optJSONArray("author_name").optString(0, "未知作者");
-                    results.add(item.optString("title", "未命名") + "\n" + author + "  ·  " + item.optInt("first_publish_year", 0));
+                    String key = item.optString("key", "");
+                    String access = item.optString("ebook_access", "");
+                    String availability = "public".equals(access) ? "可查看公开版本" : "打开图书详情/借阅页";
+                    results.add(new SearchResult(item.optString("title", "未命名"), author,
+                            item.optInt("first_publish_year", 0), key, availability));
                 }
                 runOnUiThread(() -> showSearchResults(results));
             } catch (Exception error) {
@@ -207,10 +211,39 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void showSearchResults(List<String> results) {
+    private void showSearchResults(List<SearchResult> results) {
         if (results.isEmpty()) { Toast.makeText(this, "没有匹配的公开目录记录", Toast.LENGTH_SHORT).show(); return; }
+        String[] labels = new String[results.size()];
+        for (int i = 0; i < results.size(); i++) labels[i] = results.get(i).label();
         new android.app.AlertDialog.Builder(this).setTitle("公开图书目录搜索结果")
-                .setItems(results.toArray(new String[0]), null).setPositiveButton("关闭", null).show();
+                .setItems(labels, (dialog, which) -> openSearchResult(results.get(which)))
+                .setPositiveButton("关闭", null).show();
+    }
+
+    private void openSearchResult(SearchResult result) {
+        if (result.key.isEmpty()) {
+            Toast.makeText(this, "此条记录没有可打开的详情链接", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://openlibrary.org" + result.key)));
+        } catch (Exception error) {
+            Toast.makeText(this, "无法打开浏览器：" + error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private static final class SearchResult {
+        final String title;
+        final String author;
+        final int year;
+        final String key;
+        final String availability;
+
+        SearchResult(String title, String author, int year, String key, String availability) {
+            this.title = title; this.author = author; this.year = year; this.key = key; this.availability = availability;
+        }
+
+        String label() { return title + "\n" + author + "  ·  " + year + "\n" + availability; }
     }
 
     private static byte[] readAll(InputStream input) throws java.io.IOException {

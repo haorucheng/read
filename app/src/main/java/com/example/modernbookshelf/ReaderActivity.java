@@ -62,6 +62,7 @@ public class ReaderActivity extends Activity {
         pageText.setTextColor(0xff202020);
         pageText.setTextSize(fontSize);
         pageText.setLineSpacing(dp(8), 1f);
+        pageText.setIncludeFontPadding(false);
         pageText.setGravity(Gravity.TOP | Gravity.START);
         pageText.setPadding(dp(10), dp(10), dp(10), dp(10));
         pageFrame.addView(pageText, new FrameLayout.LayoutParams(-1, -1));
@@ -87,6 +88,15 @@ public class ReaderActivity extends Activity {
         next.setOnClickListener(v -> showPage(currentPage + 1, 1, true));
         pageFrame.setOnTouchListener((view, event) -> handlePageSwipe(event));
         pageFrame.post(this::paginateFromSavedProgress);
+        pageFrame.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if ((right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) && !pages.isEmpty()) {
+                int character = pages.get(Math.min(currentPage, pages.size() - 1)).start;
+                view.post(() -> {
+                    paginate();
+                    showPage(pageForOffset(character), 0, false);
+                });
+            }
+        });
     }
 
     private void loadBook() {
@@ -106,13 +116,13 @@ public class ReaderActivity extends Activity {
 
     private void paginate() {
         pages.clear();
-        int width = pageFrame.getWidth() - dp(20);
-        int height = pageFrame.getHeight() - dp(20);
+        int width = pageFrame.getWidth() - pageText.getPaddingLeft() - pageText.getPaddingRight();
+        int height = pageFrame.getHeight() - pageText.getPaddingTop() - pageText.getPaddingBottom();
         if (width <= 0 || height <= 0 || content.isEmpty()) return;
         TextPaint paint = new TextPaint(pageText.getPaint());
         StaticLayout layout = StaticLayout.Builder.obtain(content, 0, content.length(), paint, width)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setIncludePad(true)
+                .setIncludePad(false)
                 .setLineSpacing(dp(8), 1f)
                 .build();
         int line = 0;
