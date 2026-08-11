@@ -120,6 +120,10 @@ public class ReaderActivity extends Activity {
         int height = pageFrame.getHeight() - pageText.getPaddingTop() - pageText.getPaddingBottom();
         if (width <= 0 || height <= 0 || content.isEmpty()) return;
         TextPaint paint = new TextPaint(pageText.getPaint());
+        // TextView and StaticLayout can differ by a fractional font descent on some devices.
+        // Keep one full rendered line as a safety margin so the last line is never clipped.
+        int safeHeight = height - (int) Math.ceil(paint.getFontSpacing() + dp(8));
+        if (safeHeight <= 0) return;
         StaticLayout layout = StaticLayout.Builder.obtain(content, 0, content.length(), paint, width)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                 .setIncludePad(false)
@@ -129,7 +133,7 @@ public class ReaderActivity extends Activity {
         while (line < layout.getLineCount()) {
             int firstLine = line;
             int top = layout.getLineTop(firstLine);
-            while (line < layout.getLineCount() && layout.getLineBottom(line) - top <= height) line++;
+            while (line < layout.getLineCount() && layout.getLineBottom(line) - top <= safeHeight) line++;
             if (line == firstLine) line++;
             int start = layout.getLineStart(firstLine);
             int end = layout.getLineEnd(line - 1);
