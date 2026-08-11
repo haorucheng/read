@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -24,6 +25,8 @@ public class ReaderActivity extends Activity {
     private TextView text;
     private ScrollView scroll;
     private float fontSize = 19;
+    private float touchStartX;
+    private float touchStartY;
     private final List<Integer> chapterOffsets = new ArrayList<>();
     private final List<String> chapterTitles = new ArrayList<>();
 
@@ -69,6 +72,7 @@ public class ReaderActivity extends Activity {
             text.setText("无法打开该文件：\n" + error.getMessage());
         }
         scroll.post(() -> scrollToProgress(book.progress));
+        scroll.setOnTouchListener((view, event) -> handlePageSwipe(event));
         back.setOnClickListener(v -> finish());
         smaller.setOnClickListener(v -> resize(-1));
         larger.setOnClickListener(v -> resize(1));
@@ -109,6 +113,22 @@ public class ReaderActivity extends Activity {
         int range = Math.max(0, text.getHeight() - scroll.getHeight());
         int target = Math.max(0, Math.min(range, scroll.getScrollY() + direction * pageHeight));
         scroll.smoothScrollTo(0, target);
+    }
+
+    private boolean handlePageSwipe(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            touchStartX = event.getX();
+            touchStartY = event.getY();
+        } else if (event.getAction() == MotionEvent.ACTION_UP) {
+            float deltaX = event.getX() - touchStartX;
+            float deltaY = event.getY() - touchStartY;
+            float minimumSwipe = dp(72);
+            if (Math.abs(deltaX) >= minimumSwipe && Math.abs(deltaX) > Math.abs(deltaY)) {
+                turnPage(deltaX < 0 ? 1 : -1);
+                return true;
+            }
+        }
+        return false;
     }
 
     private static byte[] readAll(FileInputStream input) throws java.io.IOException {
