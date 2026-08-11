@@ -8,6 +8,7 @@ import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -29,11 +30,14 @@ public class ReaderActivity extends Activity {
     private FrameLayout pageFrame;
     private TextView pageText;
     private TextView pageIndicator;
+    private LinearLayout settingsPanel;
+    private Button pageModeButton;
     private String content = "";
     private float fontSize = 19;
     private float touchStartX;
     private float touchStartY;
     private int currentPage;
+    private boolean verticalPaging;
     private final List<Page> pages = new ArrayList<>();
     private final List<Integer> chapterOffsets = new ArrayList<>();
     private final List<String> chapterTitles = new ArrayList<>();
@@ -46,17 +50,7 @@ public class ReaderActivity extends Activity {
         }
         if (book == null) { finish(); return; }
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(12), dp(8), dp(12), dp(8));
-        LinearLayout topBar = new LinearLayout(this);
-        Button back = button("\u8fd4\u56de");
-        Button chapters = button("\u76ee\u5f55");
-        Button smaller = button("A\u2212");
-        Button larger = button("A+");
-        addEqual(topBar, back); addEqual(topBar, chapters); addEqual(topBar, smaller); addEqual(topBar, larger);
-        root.addView(topBar);
-
+        FrameLayout root = new FrameLayout(this);
         pageFrame = new FrameLayout(this);
         pageText = new TextView(this);
         pageText.setTextColor(0xff202020);
@@ -64,9 +58,21 @@ public class ReaderActivity extends Activity {
         pageText.setLineSpacing(dp(8), 1f);
         pageText.setIncludeFontPadding(false);
         pageText.setGravity(Gravity.TOP | Gravity.START);
-        pageText.setPadding(dp(10), dp(10), dp(10), dp(10));
+        pageText.setPadding(dp(22), dp(18), dp(22), dp(18));
         pageFrame.addView(pageText, new FrameLayout.LayoutParams(-1, -1));
-        root.addView(pageFrame, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(pageFrame, new FrameLayout.LayoutParams(-1, -1));
+
+        settingsPanel = new LinearLayout(this);
+        settingsPanel.setOrientation(LinearLayout.VERTICAL);
+        settingsPanel.setPadding(dp(12), dp(8), dp(12), dp(12));
+        settingsPanel.setBackgroundColor(0xfaf7f7f7);
+        LinearLayout topBar = new LinearLayout(this);
+        Button back = button("\u8fd4\u56de");
+        Button chapters = button("\u76ee\u5f55");
+        Button smaller = button("A\u2212");
+        Button larger = button("A+");
+        addEqual(topBar, back); addEqual(topBar, chapters); addEqual(topBar, smaller); addEqual(topBar, larger);
+        settingsPanel.addView(topBar);
 
         LinearLayout bottomBar = new LinearLayout(this);
         Button previous = button("\u4e0a\u4e00\u9875");
@@ -76,7 +82,15 @@ public class ReaderActivity extends Activity {
         bottomBar.addView(previous, new LinearLayout.LayoutParams(0, dp(48), 1));
         bottomBar.addView(pageIndicator, new LinearLayout.LayoutParams(0, dp(48), 1));
         bottomBar.addView(next, new LinearLayout.LayoutParams(0, dp(48), 1));
-        root.addView(bottomBar);
+        settingsPanel.addView(bottomBar);
+        LinearLayout modeBar = new LinearLayout(this);
+        pageModeButton = button("翻页：左右滑动");
+        Button closeSettings = button("收起设置");
+        modeBar.addView(pageModeButton, new LinearLayout.LayoutParams(0, dp(46), 2));
+        modeBar.addView(closeSettings, new LinearLayout.LayoutParams(0, dp(46), 1));
+        settingsPanel.addView(modeBar);
+        settingsPanel.setVisibility(View.GONE);
+        root.addView(settingsPanel, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
         setContentView(root);
 
         loadBook();
@@ -86,6 +100,8 @@ public class ReaderActivity extends Activity {
         larger.setOnClickListener(v -> changeFont(1));
         previous.setOnClickListener(v -> showPage(currentPage - 1, -1, true));
         next.setOnClickListener(v -> showPage(currentPage + 1, 1, true));
+        pageModeButton.setOnClickListener(v -> togglePagingMode());
+        closeSettings.setOnClickListener(v -> hideSettings());
         pageFrame.setOnTouchListener((view, event) -> handlePageSwipe(event));
         pageFrame.post(this::paginateFromSavedProgress);
         pageFrame.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
@@ -162,13 +178,22 @@ public class ReaderActivity extends Activity {
             replaceText.run();
             return;
         }
-        float distance = pageFrame.getWidth();
-        pageText.animate().translationX(direction > 0 ? -distance : distance).alpha(0f).setDuration(140)
-                .withEndAction(() -> {
-                    replaceText.run();
-                    pageText.setTranslationX(direction > 0 ? distance : -distance);
-                    pageText.animate().translationX(0).alpha(1f).setDuration(180).start();
-                }).start();
+        float distance = verticalPaging ? pageFrame.getHeight() : pageFrame.getWidth();
+        if (verticalPaging) {
+            pageText.animate().translationY(direction > 0 ? -distance : distance).alpha(0f).setDuration(140)
+                    .withEndAction(() -> {
+                        replaceText.run();
+                        pageText.setTranslationY(direction > 0 ? distance : -distance);
+                        pageText.animate().translationY(0).alpha(1f).setDuration(180).start();
+                    }).start();
+        } else {
+            pageText.animate().translationX(direction > 0 ? -distance : distance).alpha(0f).setDuration(140)
+                    .withEndAction(() -> {
+                        replaceText.run();
+                        pageText.setTranslationX(direction > 0 ? distance : -distance);
+                        pageText.animate().translationX(0).alpha(1f).setDuration(180).start();
+                    }).start();
+        }
     }
 
     private boolean handlePageSwipe(MotionEvent event) {
@@ -178,12 +203,40 @@ public class ReaderActivity extends Activity {
         } else if (event.getAction() == MotionEvent.ACTION_UP) {
             float deltaX = event.getX() - touchStartX;
             float deltaY = event.getY() - touchStartY;
-            if (Math.abs(deltaX) >= dp(56) && Math.abs(deltaX) > Math.abs(deltaY)) {
+            if (Math.abs(deltaX) < dp(12) && Math.abs(deltaY) < dp(12)
+                    && touchStartX > pageFrame.getWidth() * .25f && touchStartX < pageFrame.getWidth() * .75f
+                    && touchStartY > pageFrame.getHeight() * .25f && touchStartY < pageFrame.getHeight() * .75f) {
+                showSettings();
+                return true;
+            }
+            if (!verticalPaging && Math.abs(deltaX) >= dp(56) && Math.abs(deltaX) > Math.abs(deltaY)) {
                 showPage(currentPage + (deltaX < 0 ? 1 : -1), deltaX < 0 ? 1 : -1, true);
+                return true;
+            }
+            if (verticalPaging && Math.abs(deltaY) >= dp(56) && Math.abs(deltaY) > Math.abs(deltaX)) {
+                showPage(currentPage + (deltaY < 0 ? 1 : -1), deltaY < 0 ? 1 : -1, true);
                 return true;
             }
         }
         return true;
+    }
+
+    private void togglePagingMode() {
+        verticalPaging = !verticalPaging;
+        pageModeButton.setText(verticalPaging ? "翻页：上下滑动" : "翻页：左右滑动");
+    }
+
+    private void showSettings() {
+        if (settingsPanel.getVisibility() == View.VISIBLE) return;
+        settingsPanel.setVisibility(View.VISIBLE);
+        settingsPanel.setAlpha(0f);
+        settingsPanel.setTranslationY(dp(180));
+        settingsPanel.animate().alpha(1f).translationY(0).setDuration(180).start();
+    }
+
+    private void hideSettings() {
+        settingsPanel.animate().alpha(0f).translationY(dp(180)).setDuration(160)
+                .withEndAction(() -> settingsPanel.setVisibility(View.GONE)).start();
     }
 
     private void changeFont(int delta) {
