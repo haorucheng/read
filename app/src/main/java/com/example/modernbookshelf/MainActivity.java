@@ -180,8 +180,14 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 String encoded = URLEncoder.encode(text, StandardCharsets.UTF_8.name());
-                HttpURLConnection connection = (HttpURLConnection) new URL("https://openlibrary.org/search.json?q=" + encoded + "&limit=15").openConnection();
+                HttpURLConnection connection = (HttpURLConnection) new URL("https://openlibrary.org/search.json?title=" + encoded + "&limit=15&fields=title,author_name,first_publish_year").openConnection();
+                connection.setRequestProperty("Accept", "application/json");
+                connection.setRequestProperty("User-Agent", "ModernBookshelf/1.0 (Android)");
                 connection.setConnectTimeout(10_000); connection.setReadTimeout(10_000);
+                int responseCode = connection.getResponseCode();
+                if (responseCode != HttpURLConnection.HTTP_OK) {
+                    throw new java.io.IOException("HTTP " + responseCode);
+                }
                 InputStream in = connection.getInputStream();
                 String raw;
                 try (InputStream response = in) {
